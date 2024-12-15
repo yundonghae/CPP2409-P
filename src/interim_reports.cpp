@@ -5,9 +5,46 @@
 #include <thread>             // thread
 #include <condition_variable> // condition_variable
 #include <chrono>             // chrono
+#include <fstream>            // ifstream, ofstream (파일 입출력)
 
 using namespace std;
 
+// 최고 점수
+int highScore = 0;                              // 프로그램 실행 시 저장된 기록을 불러올 변수
+const string HIGH_SCORE_FILE = "highscore.txt"; // 최고 점수 저장 파일 이름
+
+// 최고 점수 불러오기
+void loadHighScore()
+{
+    ifstream file(HIGH_SCORE_FILE);
+    if (file.is_open())
+    {
+        file >> highScore;
+        file.close();
+    }
+    else
+    {
+        highScore = 0; // 파일이 없거나 열 수 없으면 기본값 0
+    }
+}
+
+// 최고 점수 저장하기
+void saveHighScore(int currentScore)
+{
+    // 현재 점수가 기존의 highScore보다 크면 갱신
+    if (currentScore > highScore)
+    {
+        highScore = currentScore;
+        ofstream file(HIGH_SCORE_FILE);
+        if (file.is_open())
+        {
+            file << highScore;
+            file.close();
+        }
+    }
+}
+
+// 단어 섞기 함수
 void shuffleWord(string &word)
 {
     random_device rd;                             // 난수 생성기
@@ -15,6 +52,7 @@ void shuffleWord(string &word)
     shuffle(word.begin(), word.end(), generator); // std::shuffle 사용
 }
 
+// 주제 선택 함수
 vector<string> chooseTheme()
 {
     int choice;
@@ -42,19 +80,21 @@ void adjustDifficulty(vector<string> &words)
          { return a.size() < b.size(); });
 }
 
-// 제한 시간 기능 추가
+// 제한 시간 기능과 관련된 전역 변수, 조건 변수, 뮤텍스
 bool userInputReceived = false;
 condition_variable cv;
 mutex mtx;
 
+// 사용자 입력 대기 함수 (별도 스레드에서 실행)
 void waitForInput(string &playerGuess)
 {
-    cin >> playerGuess; // 사용자 입력 대기
+    cin >> playerGuess; // 사용자 입력
     lock_guard<mutex> lock(mtx);
-    userInputReceived = true; // 입력 완료 표시
-    cv.notify_one();          // 입력 완료 알림 (제한 시간을 기다리는 스레드에 입력이 완료되었음을 알림)
+    userInputReceived = true;
+    cv.notify_one(); // 입력 완료 알림
 }
 
+// 타이머 함수
 bool startTimer(int timeLimit, string &playerGuess)
 {
     unique_lock<mutex> lock(mtx);
@@ -71,10 +111,14 @@ bool startTimer(int timeLimit, string &playerGuess)
 
 int main()
 {
-    int score = 0;        // 초기 점수 설정
+    // 프로그램 시작 시 최고 점수 로드
+    loadHighScore();
+    cout << "현재 최고 점수: " << highScore << "점\n";
+
+    int score = 0;        // 현재 세션의 점수
     char playAgain = 'y'; // 재시작 여부
 
-    while (playAgain == 'y' || playAgain == 'Y') // 대소문자
+    while (playAgain == 'y' || playAgain == 'Y')
     {
         // 주제 선택 및 단어 로드
         vector<string> words = chooseTheme();
@@ -93,12 +137,12 @@ int main()
             cout << "원래 단어를 맞춰보세요 (제한 시간: 10초): ";
 
             string playerGuess;
-            userInputReceived = false;                          // 초기화
-            thread inputThread(waitForInput, ref(playerGuess)); // 입력 대기 스레드 시작
+            userInputReceived = false;
+            thread inputThread(waitForInput, ref(playerGuess));
 
             if (startTimer(10, playerGuess))
             {
-                inputThread.join(); // 입력이 완료되면 스레드 종료
+                inputThread.join(); // 입력 완료
                 if (playerGuess == originalWord)
                 {
                     cout << "정답입니다!\n";
@@ -112,14 +156,14 @@ int main()
             }
             else
             {
-                inputThread.detach(); // 시간 초과 시 스레드 분리
+                inputThread.detach(); // 시간 초과
                 cout << "\n시간 초과! 정답은 '" << originalWord << "' 입니다.\n";
                 score -= 5; // 시간 초과 시 점수 감소
             }
 
             cout << "현재 점수: " << score << "\n";
 
-            // 플레이어가 중간에 종료를 원하면 루프를 빠져나갑니다.
+            // 중단 여부
             cout << "다음 단어로 진행하시겠습니까? (y/n): ";
             char next;
             cin >> next;
@@ -127,10 +171,14 @@ int main()
                 break;
         }
 
-        // 재시작 여부 확인
+        // 다시 시작 여부
         cout << "다시 하시겠습니까? (y/n): ";
         cin >> playAgain;
     }
-    cout << "\n최종 점수는 " << score << "점 입니다!\n";
+
+    // 게임 종료 후 최종 점수와 최고 점수 갱신
+    cout << "\n최종 점수: " << score << "점 입니다!\n";
+    saveHighScore(score); // 최고 점수 갱신 시도
+    cout << "현재 최고 점수: " << highScore << "점\n";
     return 0;
 }
